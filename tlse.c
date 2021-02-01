@@ -7672,10 +7672,13 @@ int tls_parse_server_key_exchange(struct TLSContext *context, const unsigned cha
         memcpy(message + TLS_CLIENT_RANDOM_SIZE + TLS_SERVER_RANDOM_SIZE, packet_ref, packet_size);
 
         {
-            FILE* f = fopen("PROOF", "w");
+            char* proof = "PROOF";
+            FILE* f = fopen(proof, "w");
             fwrite(message, 1, message_len, f);
             fwrite(signature, 1, sign_size, f);
             fclose(f);
+            printf("Written transcript to %s\n", proof);
+
         }
 #ifdef TLS_CLIENT_ECDSA
         if (tls_is_ecdsa(context)) {
@@ -8257,6 +8260,7 @@ int tls_parse_payload(struct TLSContext *context, const unsigned char *buf, int 
                 DEBUG_PRINT(" => NOT UNDERSTOOD PAYLOAD TYPE: %x\n", (int)type);
                 return TLS_NOT_UNDERSTOOD;
         }
+
         if ((type != 0x00) && (update_hash))
             _private_tls_update_hash(context, buf, payload_size + 1);
         
