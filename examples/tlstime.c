@@ -166,11 +166,13 @@ int main(int argc, char *argv[]) {
         close(sockfd);
 
 
-        time_2 += (t_mid2.tv_sec - t_mid1.tv_sec) * 1000 + 
+        double t_2 = (t_mid2.tv_sec - t_mid1.tv_sec) * 1000 + 
                             (double) (t_mid2.tv_nsec - t_mid1.tv_nsec) / 1000000;
-        time_3 += (t_end.tv_sec - t_mid2.tv_sec) * 1000 + 
+        double t_3 = (t_end.tv_sec - t_mid2.tv_sec) * 1000 + 
                                 (double) (t_end.tv_nsec - t_mid2.tv_nsec) / 1000000;
-        printf("(connect)%f + (tls)%f\n", time_2, time_3);
+        printf("(connect)%f + (tls)%f\n", t_2, t_3);
+        time_2 += t_2;
+        time_3 += t_3;
     }
 
     double time_startup = ((t_mid0.tv_sec - t_begin.tv_sec) * 1000 + 
