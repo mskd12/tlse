@@ -7633,10 +7633,10 @@ int tls_parse_server_key_exchange(struct TLSContext *context, const unsigned cha
     unsigned char *message = (unsigned char *)TLS_MALLOC(message_len);
     if (message) {
         { // Adding for geolocation
-#ifdef INFO
             uint32_t foo;
             memcpy(&foo, context->remote_random, 4);
             printf("Server time: %lu\n", (unsigned long)ntohl(foo));
+#ifdef INFO
 
             unsigned char hash[32];
             hash_state state;
