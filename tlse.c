@@ -7633,6 +7633,7 @@ int tls_parse_server_key_exchange(struct TLSContext *context, const unsigned cha
     unsigned char *message = (unsigned char *)TLS_MALLOC(message_len);
     if (message) {
         { // Adding for geolocation
+#ifdef INFO
             uint32_t foo;
             memcpy(&foo, context->remote_random, 4);
             printf("Server time: %lu\n", (unsigned long)ntohl(foo));
@@ -7648,7 +7649,6 @@ int tls_parse_server_key_exchange(struct TLSContext *context, const unsigned cha
             TLS_ERROR(err, exit(0))
 
             DUMP_HEX_LABEL("Hash(sign)", hash, 32);
-#ifdef INFO
             DUMP_HEX_LABEL("client random ", context->local_random, TLS_SERVER_RANDOM_SIZE);
             DUMP_HEX_LABEL("server random", context->remote_random, TLS_CLIENT_RANDOM_SIZE);
             DUMP_HEX_LABEL("signature ", signature, sign_size);
@@ -7672,13 +7672,14 @@ int tls_parse_server_key_exchange(struct TLSContext *context, const unsigned cha
         memcpy(message + TLS_CLIENT_RANDOM_SIZE + TLS_SERVER_RANDOM_SIZE, packet_ref, packet_size);
 
         {
+#ifdef INFO
             char* proof = "PROOF";
             FILE* f = fopen(proof, "w");
             fwrite(message, 1, message_len, f);
             fwrite(signature, 1, sign_size, f);
             fclose(f);
             printf("Written transcript to %s\n", proof);
-
+#endif
         }
 #ifdef TLS_CLIENT_ECDSA
         if (tls_is_ecdsa(context)) {
