@@ -7633,11 +7633,11 @@ int tls_parse_server_key_exchange(struct TLSContext *context, const unsigned cha
     unsigned char *message = (unsigned char *)TLS_MALLOC(message_len);
     if (message) {
         { // Adding for geolocation
-#ifdef INFO
             uint32_t foo;
             memcpy(&foo, context->remote_random, 4);
             printf("Server time: %lu\n", (unsigned long)ntohl(foo));
 
+#ifdef INFO
             unsigned char hash[32];
             hash_state state;
             int hash_idx = find_hash("sha256");
@@ -7699,7 +7699,7 @@ int tls_parse_server_key_exchange(struct TLSContext *context, const unsigned cha
             INFO_PRINT("(msg_len, sign_len, hash_type): (%i, %i, %i)\n", message_len, sign_size, hash_algorithm);
         }
         TLS_FREE(message);
-        return 0;
+        return TLS_DROP;
     }
     
     if (buf_len - res) {
@@ -8310,6 +8310,8 @@ int tls_parse_payload(struct TLSContext *context, const unsigned char *buf, int 
                     break;
                 case TLS_DECRYPTION_FAILED:
                     _private_tls_write_packet(tls_build_alert(context, 1, decryption_failed_RESERVED));
+                    break;
+                case TLS_DROP:
                     break;
             }
             if (payload_res < 0)

@@ -150,8 +150,12 @@ int main(int argc, char *argv[]) {
         while ((read_size = recv(sockfd, client_message, sizeof(client_message) , 0)) > 0) {
             printf("New read\n");
             clock_gettime(CLOCK_MONOTONIC_RAW, &t_read_0);
-            tls_consume_stream(context, client_message, read_size, NULL);
+            int st = tls_consume_stream(context, client_message, read_size, NULL);
+            printf("Read over %d\n", st);
+
             clock_gettime(CLOCK_MONOTONIC_RAW, &t_read_1);
+            if (st == TLS_DROP)
+                break;
             clock_gettime(CLOCK_MONOTONIC_RAW, &t_send_0);
             send_pending(sockfd, context);
             clock_gettime(CLOCK_MONOTONIC_RAW, &t_send_1);

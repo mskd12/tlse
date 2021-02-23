@@ -77,6 +77,7 @@
 #define TLS_NO_RENEGOTIATION    -16
 #define TLS_FEATURE_NOT_SUPPORTED   -17
 #define TLS_DECRYPTION_FAILED   -20
+#define TLS_DROP       -21
 
 #define TLS_AES_128_GCM_SHA256                0x1301
 #define TLS_AES_256_GCM_SHA384                0x1302
