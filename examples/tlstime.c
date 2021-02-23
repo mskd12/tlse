@@ -116,16 +116,25 @@ int main(int argc, char *argv[]) {
     int read_size;
     int sent = 0;
     struct TLSContext *context;
+    struct timespec t_start, t_end, t_rt1_start, t_rt1_end;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t_start);
+    double time_rt1 = 0;
+    double t1;
 
     for (int run_id=0; run_id < NUM_RUNS; run_id++) {
+	clock_gettime(CLOCK_MONOTONIC_RAW, &t_rt1_start);
         sockfd = socket(AF_INET, SOCK_STREAM, 0);
         if (sockfd < 0) 
             error("ERROR opening socket");
 
         if (connect(sockfd, (struct sockaddr *)&serv_addr,sizeof(serv_addr)) < 0) 
             error("ERROR connecting");
+	clock_gettime(CLOCK_MONOTONIC_RAW, &t_rt1_end);
+    	t1 = ((t_rt1_end.tv_sec - t_rt1_start.tv_sec) * 1000 + 
+                            (double) (t_rt1_end.tv_nsec - t_rt1_start.tv_nsec) / 1000000);
+        time_rt1 += t1;
 
-        context = tls_create_context(0, TLS_V12);
+	context = tls_create_context(0, TLS_V12);
         // the next line is needed only if you want to serialize the connection context or kTLS is used
         // tls_make_exportable(context, 1);
         my_tls_client_connect(context, client_random);
@@ -137,5 +146,10 @@ int main(int argc, char *argv[]) {
 
         close(sockfd);
     }
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t_end);
+    double time_elapsed = ((t_end.tv_sec - t_start.tv_sec) * 1000 + 
+                            (double) (t_end.tv_nsec - t_start.tv_nsec) / 1000000);
+    printf("%f\n%f\n", time_rt1 / NUM_RUNS, time_elapsed / NUM_RUNS);
+
     return 0;
 }
