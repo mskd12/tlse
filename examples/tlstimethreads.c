@@ -18,6 +18,26 @@ pthread_cond_t count_threshold_cv[MAX_TCP_CONN];
 int socketfds[MAX_TCP_CONN];
 
 char* host;
+double t_rt1 = 0;
+pthread_mutex_t measurement_mutex;
+struct sockaddr_in serv_addr;
+
+char client_random[32];
+
+struct TLSContext* context[MAX_TCP_CONN];
+
+void hostinit() {
+  struct hostent *server = gethostbyname(host);
+  if (server == NULL) {
+      fprintf(stderr,"ERROR, no such host\n");
+      exit(0);
+  }
+
+  memset((char *) &serv_addr, 0, sizeof(serv_addr));
+  serv_addr.sin_family = AF_INET;
+  memcpy((char *)&serv_addr.sin_addr.s_addr, (char *)server->h_addr, server->h_length);
+  serv_addr.sin_port = htons(443);
+}
 
 void error(char *msg) {
     perror(msg);
@@ -43,18 +63,6 @@ int send_pending(int client_sock, struct TLSContext *context) {
 }
 
 int open_socket() {
-  struct hostent *server = gethostbyname(host);
-  if (server == NULL) {
-      fprintf(stderr,"ERROR, no such host\n");
-      exit(0);
-  }
-
-  struct sockaddr_in serv_addr;
-  memset((char *) &serv_addr, 0, sizeof(serv_addr));
-  serv_addr.sin_family = AF_INET;
-  memcpy((char *)&serv_addr.sin_addr.s_addr, (char *)server->h_addr, server->h_length);
-  serv_addr.sin_port = htons(443);
-
   int sockfd = socket(AF_INET, SOCK_STREAM, 0);
   if (sockfd < 0) 
       error("ERROR opening socket");
@@ -65,24 +73,23 @@ int open_socket() {
   return sockfd;
 }
 
-void establish_tls(int sockfd) {
-  struct TLSContext* context = tls_create_context(0, TLS_V12);
-
-  char client_random[32];
-  memset(client_random, '\x12', 32);
-
-  my_tls_client_connect(context, client_random);
-  send_pending(sockfd, context); // Send CLIENT_HELLO
-  unsigned char client_message[0xFFFF];
+unsigned char client_message[0xFFFF];
+void establish_tls(int sockfd, int index) {
+  my_tls_client_connect(context[index], client_random);
+  send_pending(sockfd, context[index]); // Send CLIENT_HELLO
   int read_size;
   while ((read_size = recv(sockfd, client_message, sizeof(client_message) , 0)) > 0) {
+#ifdef DEBUG
     printf("New read\n");
-    int st = tls_consume_stream(context, client_message, read_size, NULL);
+#endif
+    int st = tls_consume_stream(context[index], client_message, read_size, NULL);
+#ifdef DEBUG
     printf("Read over %d\n", st);
+#endif
 
     if (st == TLS_DROP)
         break;
-    send_pending(sockfd, context);
+    send_pending(sockfd, context[index]);
   }
 }
 
@@ -91,7 +98,17 @@ void *runner(void *t)
   int i;
   long my_id = (long)t;
 
+  struct timespec t_begin, t_end;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &t_begin);
   int sockfd = open_socket();
+  clock_gettime(CLOCK_MONOTONIC_RAW, &t_end);
+
+  double time_elapsed = ((t_end.tv_sec - t_begin.tv_sec) * 1000 + 
+                          (double) (t_end.tv_nsec - t_begin.tv_nsec) / 1000000);
+
+  pthread_mutex_lock(&measurement_mutex);
+  t_rt1 += time_elapsed;
+  pthread_mutex_unlock(&measurement_mutex);
 
   pthread_mutex_lock(&count_mutex[my_id]);
   printf("do_tls(): thread %ld. Socket opened. Going into wait...\n", my_id);
@@ -99,7 +116,7 @@ void *runner(void *t)
   printf("do_tls(): thread %ld. Woken up...\n", my_id);
   pthread_mutex_unlock(&count_mutex[my_id]);
 
-  establish_tls(sockfd);
+  establish_tls(sockfd, my_id);
   socketfds[my_id] = sockfd; // defer closing to later
   // close(sockfd);
 
@@ -124,11 +141,15 @@ int main(int argc, char *argv[])
     exit(0);
   }
 
-  /* Initialize mutex and condition variable objects */
+  /* Initialize mutex, condition variable objects and TLS objects, do host translation */
+  hostinit();
+  memset(client_random, '\x12', 32);
   for (i = 0; i < runs; i++) {
     pthread_mutex_init(&count_mutex[i], NULL);
     pthread_cond_init (&count_threshold_cv[i], NULL);
+    context[i] = tls_create_context(0, TLS_V12);
   }
+  pthread_mutex_init(&measurement_mutex, NULL);
 
   /* For portability, explicitly create threads in a joinable state */
   pthread_attr_init(&attr);
@@ -155,7 +176,7 @@ int main(int argc, char *argv[])
 
   double time_elapsed = ((t_end.tv_sec - t_begin.tv_sec) * 1000 + 
                           (double) (t_end.tv_nsec - t_begin.tv_nsec) / 1000000);
-  printf ("Main(): Waited and joined with %d threads. Done. Time taken is %fms\n", runs, time_elapsed / runs);
+  printf ("Main(): Waited and joined with %d threads. Done. (TCP Ping vs TLS Ping): (%f %f)\n", runs, t_rt1 / runs, time_elapsed / runs);
 
   /* Clean up and exit */
   pthread_attr_destroy(&attr);
