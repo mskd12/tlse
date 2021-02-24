@@ -47,6 +47,8 @@
 #include <errno.h>
 #endif
 
+#define TLS_AMALGAMATION
+
 #ifdef TLS_AMALGAMATION
 #include "libtomcrypt.c"
 #else

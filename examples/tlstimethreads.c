@@ -19,6 +19,7 @@ int socketfds[MAX_TCP_CONN];
 
 char* host;
 double t_rt1 = 0;
+double t_client = 0;
 pthread_mutex_t measurement_mutex;
 struct sockaddr_in serv_addr;
 
@@ -75,14 +76,19 @@ int open_socket() {
 
 unsigned char client_message[0xFFFF];
 void establish_tls(int sockfd, int index) {
-  my_tls_client_connect(context[index], client_random);
   send_pending(sockfd, context[index]); // Send CLIENT_HELLO
   int read_size;
   while ((read_size = recv(sockfd, client_message, sizeof(client_message) , 0)) > 0) {
 #ifdef DEBUG
     printf("New read\n");
 #endif
+    struct timespec t_begin, t_end;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t_begin);
     int st = tls_consume_stream(context[index], client_message, read_size, NULL);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t_end);
+
+    t_client += ((t_end.tv_sec - t_begin.tv_sec) * 1000 + 
+                  (double) (t_end.tv_nsec - t_begin.tv_nsec) / 1000000);
 #ifdef DEBUG
     printf("Read over %d\n", st);
 #endif
@@ -113,14 +119,27 @@ void *runner(void *t)
   pthread_mutex_lock(&count_mutex[my_id]);
   printf("do_tls(): thread %ld. Socket opened. Going into wait...\n", my_id);
   pthread_cond_wait(&count_threshold_cv[my_id], &count_mutex[my_id]);
-  printf("do_tls(): thread %ld. Woken up...\n", my_id);
-  pthread_mutex_unlock(&count_mutex[my_id]);
+  {
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t_begin);
+    printf("do_tls(): thread %ld. Woken up...\n", my_id);
+    pthread_mutex_unlock(&count_mutex[my_id]);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t_end);
+    t_client += ((t_end.tv_sec - t_begin.tv_sec) * 1000 + 
+                  (double) (t_end.tv_nsec - t_begin.tv_nsec) / 1000000);
+  }
 
   establish_tls(sockfd, my_id);
-  socketfds[my_id] = sockfd; // defer closing to later
-  // close(sockfd);
 
-  pthread_exit(NULL);
+  {
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t_begin);
+    socketfds[my_id] = sockfd; // defer closing to later
+    // close(sockfd);
+
+    pthread_exit(NULL);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t_end);
+    t_client += ((t_end.tv_sec - t_begin.tv_sec) * 1000 + 
+                  (double) (t_end.tv_nsec - t_begin.tv_nsec) / 1000000);
+  }
 }
 
 int main(int argc, char *argv[])
@@ -148,6 +167,7 @@ int main(int argc, char *argv[])
     pthread_mutex_init(&count_mutex[i], NULL);
     pthread_cond_init (&count_threshold_cv[i], NULL);
     context[i] = tls_create_context(0, TLS_V12);
+    my_tls_client_connect(context[i], client_random);
   }
   pthread_mutex_init(&measurement_mutex, NULL);
 
@@ -161,13 +181,19 @@ int main(int argc, char *argv[])
 
   sleep(1); // Wait till all connections are up
 
-  struct timespec t_begin, t_end;
+  struct timespec t_begin, t_end, t_begin_1, t_end_1;
   clock_gettime(CLOCK_MONOTONIC_RAW, &t_begin);
   /* Now wake up threads one after another */
   for (i = 0; i < runs; i++) {
-    pthread_mutex_lock(&count_mutex[i]);
-    pthread_cond_signal(&count_threshold_cv[i]);
-    pthread_mutex_unlock(&count_mutex[i]);
+    {
+      clock_gettime(CLOCK_MONOTONIC_RAW, &t_begin_1);
+      pthread_mutex_lock(&count_mutex[i]);
+      pthread_cond_signal(&count_threshold_cv[i]);
+      pthread_mutex_unlock(&count_mutex[i]);
+      clock_gettime(CLOCK_MONOTONIC_RAW, &t_end_1);
+      t_client += ((t_end_1.tv_sec - t_begin_1.tv_sec) * 1000 + 
+                      (double) (t_end_1.tv_nsec - t_begin_1.tv_nsec) / 1000000);
+    }
 
     // Wait until the thread is over.
     pthread_join(threads[i], NULL);
@@ -177,6 +203,7 @@ int main(int argc, char *argv[])
   double time_elapsed = ((t_end.tv_sec - t_begin.tv_sec) * 1000 + 
                           (double) (t_end.tv_nsec - t_begin.tv_nsec) / 1000000);
   printf ("Main(): Waited and joined with %d threads. Done. (TCP Ping vs TLS Ping): (%f %f)\n", runs, t_rt1 / runs, time_elapsed / runs);
+  printf ("(TLS Ping, Client Proc): (%f %f)\n", time_elapsed / runs, t_client / runs);
 
   /* Clean up and exit */
   pthread_attr_destroy(&attr);
