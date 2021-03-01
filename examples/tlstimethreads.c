@@ -19,7 +19,7 @@ int socketfds[MAX_TCP_CONN];
 
 char* host;
 double t_rt1 = 0;
-double t_client = 0;
+double t_client = 0, diff;
 pthread_mutex_t measurement_mutex;
 struct sockaddr_in serv_addr;
 
@@ -76,26 +76,40 @@ int open_socket() {
 
 unsigned char client_message[0xFFFF];
 void establish_tls(int sockfd, int index) {
+  struct timespec t_begin, t_end;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &t_begin);
   send_pending(sockfd, context[index]); // Send CLIENT_HELLO
+  clock_gettime(CLOCK_MONOTONIC_RAW, &t_end);
+  diff = ((t_end.tv_sec - t_begin.tv_sec) * 1000 + 
+                (double) (t_end.tv_nsec - t_begin.tv_nsec) / 1000000);
+  t_client += diff;
+  printf("#1: %f\n", diff);
+
   int read_size;
   while ((read_size = recv(sockfd, client_message, sizeof(client_message) , 0)) > 0) {
 #ifdef DEBUG
     printf("New read\n");
 #endif
-    struct timespec t_begin, t_end;
     clock_gettime(CLOCK_MONOTONIC_RAW, &t_begin);
     int st = tls_consume_stream(context[index], client_message, read_size, NULL);
     clock_gettime(CLOCK_MONOTONIC_RAW, &t_end);
 
-    t_client += ((t_end.tv_sec - t_begin.tv_sec) * 1000 + 
+    diff = ((t_end.tv_sec - t_begin.tv_sec) * 1000 + 
                   (double) (t_end.tv_nsec - t_begin.tv_nsec) / 1000000);
+    t_client += diff;
+    printf("#2: %f\n", diff);
 #ifdef DEBUG
     printf("Read over %d\n", st);
 #endif
 
     if (st == TLS_DROP)
         break;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t_begin);
     send_pending(sockfd, context[index]);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t_end);
+    diff = ((t_end.tv_sec - t_begin.tv_sec) * 1000 + 
+                  (double) (t_end.tv_nsec - t_begin.tv_nsec) / 1000000);
+    t_client += diff;
   }
 }
 

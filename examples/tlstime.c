@@ -119,12 +119,17 @@ int main(int argc, char *argv[]) {
     unsigned char client_message[0xFFFF];
     int read_size;
     int sent = 0;
-    struct TLSContext *context;
+    struct TLSContext *context[NUM_RUNS];
+    for (int i = 0; i < NUM_RUNS; i++) {
+        context[i] = tls_create_context(0, TLS_V12);
+    }
     double time_2 = 0, time_3 = 0, time_4 = 0;
-    clock_gettime(CLOCK_MONOTONIC_RAW, &t_mid0);
 
-    for (int run_id=0; run_id < NUM_RUNS; run_id++) {
-        printf("\nrun_id: %d\n", run_id);
+    // End of initialization stuff
+    double t_client_processing, time_send, time_read, t_2, t_3;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t_mid0);
+    for (int i=0; i < NUM_RUNS; i++) {
+        printf("\nrun_id: %d\n", i);
         clock_gettime(CLOCK_MONOTONIC_RAW, &t_mid1);
         sockfd = socket(AF_INET, SOCK_STREAM, 0);
         if (sockfd < 0) 
@@ -133,50 +138,47 @@ int main(int argc, char *argv[]) {
         if (connect(sockfd, (struct sockaddr *)&serv_addr,sizeof(serv_addr)) < 0) 
             error("ERROR connecting");
 
-        clock_gettime(CLOCK_MONOTONIC_RAW, &t_send_0);
-        context = tls_create_context(0, TLS_V12);
-        // the next line is needed only if you want to serialize the connection context or kTLS is used
-        // tls_make_exportable(context, 1);
-        my_tls_client_connect(context, client_random);
-        send_pending(sockfd, context); // Send CLIENT_HELLO
-        /////////
-        clock_gettime(CLOCK_MONOTONIC_RAW, &t_send_1);
-        double time_send = (t_send_1.tv_sec - t_send_0.tv_sec) * 1000 + 
-                        (double) (t_send_1.tv_nsec - t_send_0.tv_nsec) / 1000000;
-        printf("t_send (Client Hello): %f\n", time_send);
         clock_gettime(CLOCK_MONOTONIC_RAW, &t_mid2);
-        /////////
-        double t_client_processing = 0;
+
+        clock_gettime(CLOCK_MONOTONIC_RAW, &t_send_0);
+        my_tls_client_connect(context[i], client_random);
+        send_pending(sockfd, context[i]); // Send CLIENT_HELLO
+        clock_gettime(CLOCK_MONOTONIC_RAW, &t_send_1);
+        t_client_processing = (t_send_1.tv_sec - t_send_0.tv_sec) * 1000 + 
+                                (double) (t_send_1.tv_nsec - t_send_0.tv_nsec) / 1000000;
+        printf("#1: %f\n", t_client_processing);
         while ((read_size = recv(sockfd, client_message, sizeof(client_message) , 0)) > 0) {
-            printf("New read\n");
             clock_gettime(CLOCK_MONOTONIC_RAW, &t_read_0);
-            int st = tls_consume_stream(context, client_message, read_size, NULL);
-            printf("Read over %d\n", st);
+            int st = tls_consume_stream(context[i], client_message, read_size, NULL);
 
             clock_gettime(CLOCK_MONOTONIC_RAW, &t_read_1);
+            time_read = (t_read_1.tv_sec - t_read_0.tv_sec) * 1000 + 
+                        (double) (t_read_1.tv_nsec - t_read_0.tv_nsec) / 1000000;
+            t_client_processing += time_read;
+            printf("#2: %f\n", t_client_processing);
+
             if (st == TLS_DROP)
                 break;
+
             clock_gettime(CLOCK_MONOTONIC_RAW, &t_send_0);
-            send_pending(sockfd, context);
+            send_pending(sockfd, context[i]);
             clock_gettime(CLOCK_MONOTONIC_RAW, &t_send_1);
 
-            double time_read = (t_read_1.tv_sec - t_read_0.tv_sec) * 1000 + 
-                            (double) (t_read_1.tv_nsec - t_read_0.tv_nsec) / 1000000;
-            double time_send = (t_send_1.tv_sec - t_send_0.tv_sec) * 1000 + 
-                            (double) (t_send_1.tv_nsec - t_send_0.tv_nsec) / 1000000;
-            t_client_processing += time_read + time_send;
+            time_send = (t_send_1.tv_sec - t_send_0.tv_sec) * 1000 + 
+                        (double) (t_send_1.tv_nsec - t_send_0.tv_nsec) / 1000000;
+            t_client_processing += time_send;
+            printf("#3: %f\n", t_client_processing);
         }
 
         clock_gettime(CLOCK_MONOTONIC_RAW, &t_end);
 
-        close(sockfd);
+        close(sockfd); // Not including closing into the counting
 
-
-        double t_2 = (t_mid2.tv_sec - t_mid1.tv_sec) * 1000 + 
-                            (double) (t_mid2.tv_nsec - t_mid1.tv_nsec) / 1000000;
-        double t_3 = (t_end.tv_sec - t_mid2.tv_sec) * 1000 + 
-                                (double) (t_end.tv_nsec - t_mid2.tv_nsec) / 1000000;
-        printf("(rt #1)%f, (rt #2)%f = (client)%f + (rest)%f\n", t_2, t_3, t_client_processing, t_3 - t_client_processing);
+        t_2 = (t_mid2.tv_sec - t_mid1.tv_sec) * 1000 + 
+                    (double) (t_mid2.tv_nsec - t_mid1.tv_nsec) / 1000000;
+        t_3 = (t_end.tv_sec - t_mid2.tv_sec) * 1000 + 
+                    (double) (t_end.tv_nsec - t_mid2.tv_nsec) / 1000000;
+        printf("(rt #1)%f, (rt #2)%f, (client)%f\n", t_2, t_3, t_client_processing);
         time_2 += t_2;
         time_3 += t_3;
         time_4 += t_client_processing;
@@ -186,11 +188,9 @@ int main(int argc, char *argv[]) {
     double time_startup = ((t_mid0.tv_sec - t_begin.tv_sec) * 1000 + 
                             (double) (t_mid0.tv_nsec - t_begin.tv_nsec) / 1000000);
 
-
-    double time_elapsed = ((t_end.tv_sec - t_mid0.tv_sec) * 1000 + 
-                            (double) (t_end.tv_nsec - t_mid0.tv_nsec) / 1000000);
-    printf("(startup)%f + (rt #1)%f + (rt #2)%f = %fms elapsed\n", time_startup, time_2/NUM_RUNS, time_3/NUM_RUNS, time_elapsed/NUM_RUNS);
-    // printf("delta: %f\n", (time_2/NUM_RUNS + time_3/NUM_RUNS - time_elapsed/NUM_RUNS));
+    printf("(startup)%f, (online)%f = (tcp rtt)%f + (tls rtt)%f\n", time_startup, (time_2 + time_3)/NUM_RUNS, time_2/NUM_RUNS, time_3/NUM_RUNS);
     printf("Avg. client processing time: %f\n", time_4/NUM_RUNS);
+
+    printf ("%f\n%f\n%f\n", time_4/NUM_RUNS,  time_2/NUM_RUNS, time_3/NUM_RUNS);
     return 0;
 }
